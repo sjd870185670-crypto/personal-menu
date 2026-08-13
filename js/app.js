@@ -1383,6 +1383,25 @@ function bindProfile() {
 }
 
 function renderProfilePage() {
+  // 在页面顶部给出一个明显的存储环境提示
+  let storageBanner = document.getElementById('storage-warning');
+  if (!storageBanner) {
+    storageBanner = document.createElement('div');
+    storageBanner.id = 'storage-warning';
+    storageBanner.style.cssText = 'display:none;margin:0 16px 12px;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.5;background:#FFF3E6;color:#A65D35;border:1px solid #FFD9B3;';
+    const form = document.getElementById('profile-form');
+    if (form && form.parentNode) form.parentNode.insertBefore(storageBanner, form);
+  }
+  if (storageBanner) {
+    if (!isStorageAvailable()) {
+      storageBanner.style.display = 'block';
+      storageBanner.innerHTML = '⚠️ 当前浏览器（如小米 AI、微信内置浏览器等）可能会限制网页保存数据，<b>请用手机自带浏览器（Safari / Chrome）打开本页面</b>，否则刷新后数据可能丢失。';
+    } else {
+      storageBanner.style.display = 'none';
+      storageBanner.textContent = '';
+    }
+  }
+
   if (!state.profile) {
     document.getElementById('target-grid').style.display = 'none';
     document.getElementById('custom-goal-group').style.display = 'none';
