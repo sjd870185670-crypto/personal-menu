@@ -7,8 +7,48 @@ function getKey(key) {
   return PREFIX + key;
 }
 
+// 统一读取：在禁用存储的上下文（无痕/App 内浏览器）中 getItem 可能抛错，安全降级为 null
+function storageGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (e) {
+    return null;
+  }
+}
+
+// 统一写入：写完回读校验，确认真的持久化成功；被禁用时抛出清晰中文错误
+function storageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    const check = localStorage.getItem(key);
+    if (check === null && value !== null) {
+      throw new Error('write-not-persisted');
+    }
+  } catch (e) {
+    const name = (e && e.name) || '';
+    const blocked = name === 'SecurityError' || name === 'QuotaExceededError' || (e && e.message === 'write-not-persisted');
+    if (blocked) {
+      throw new Error('无法保存：当前浏览器环境禁用了本地存储（常见于无痕模式、微信/QQ 等 App 内浏览器，或"添加到主屏幕"的受限模式）。请改用手机自带浏览器（Safari / Chrome）打开本页面后再建档。');
+    }
+    throw e;
+  }
+}
+
+// 检测存储是否可用：在页面加载时就告诉用户，避免事后才发现保存无效
+export function isStorageAvailable() {
+  try {
+    const testKey = getKey('__test__');
+    storageSet(testKey, '1');
+    storageGet(testKey);
+    localStorage.removeItem(testKey);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 export function getProfile() {
-  const raw = localStorage.getItem(getKey('profile'));
+  const raw = storageGet(getKey('profile'));
   if (!raw) return null;
   try {
     return JSON.parse(raw);
@@ -18,35 +58,35 @@ export function getProfile() {
 }
 
 export function setProfile(profile) {
-  localStorage.setItem(getKey('profile'), JSON.stringify(profile));
+  storageSet(getKey('profile'), JSON.stringify(profile));
 }
 
 export function getNickname() {
-  return localStorage.getItem(getKey('nickname')) || '';
+  return storageGet(getKey('nickname')) || '';
 }
 
 export function setNickname(name) {
-  localStorage.setItem(getKey('nickname'), String(name).trim());
+  storageSet(getKey('nickname'), String(name).trim());
 }
 
 export function getGreeting() {
-  return localStorage.getItem(getKey('greeting')) || '';
+  return storageGet(getKey('greeting')) || '';
 }
 
 export function setGreeting(text) {
-  localStorage.setItem(getKey('greeting'), String(text).trim());
+  storageSet(getKey('greeting'), String(text).trim());
 }
 
 export function getSubtitle() {
-  return localStorage.getItem(getKey('subtitle')) || '';
+  return storageGet(getKey('subtitle')) || '';
 }
 
 export function setSubtitle(text) {
-  localStorage.setItem(getKey('subtitle'), String(text).trim());
+  storageSet(getKey('subtitle'), String(text).trim());
 }
 
 export function getLogs() {
-  const raw = localStorage.getItem(getKey('logs'));
+  const raw = storageGet(getKey('logs'));
   if (!raw) return {};
   try {
     return JSON.parse(raw);
@@ -56,7 +96,7 @@ export function getLogs() {
 }
 
 export function setLogs(logs) {
-  localStorage.setItem(getKey('logs'), JSON.stringify(logs));
+  storageSet(getKey('logs'), JSON.stringify(logs));
 }
 
 export function getDateLog(date) {
@@ -121,7 +161,7 @@ export function getTodayStr() {
 }
 
 export function getCustomFoods() {
-  const raw = localStorage.getItem(getKey('customFoods'));
+  const raw = storageGet(getKey('customFoods'));
   if (!raw) return [];
   try {
     return JSON.parse(raw);
@@ -131,7 +171,7 @@ export function getCustomFoods() {
 }
 
 export function setCustomFoods(list) {
-  localStorage.setItem(getKey('customFoods'), JSON.stringify(list));
+  storageSet(getKey('customFoods'), JSON.stringify(list));
 }
 
 export function addCustomFood(food) {
@@ -149,7 +189,7 @@ export function deleteCustomFood(id) {
 }
 
 export function getBreakfastIds() {
-  const raw = localStorage.getItem(getKey('breakfastIds'));
+  const raw = storageGet(getKey('breakfastIds'));
   if (!raw) return [];
   try {
     return JSON.parse(raw);
@@ -159,7 +199,7 @@ export function getBreakfastIds() {
 }
 
 export function setBreakfastIds(ids) {
-  localStorage.setItem(getKey('breakfastIds'), JSON.stringify(ids));
+  storageSet(getKey('breakfastIds'), JSON.stringify(ids));
 }
 
 export function toggleBreakfastId(id) {
@@ -187,7 +227,7 @@ function hashIconData(dataUrl) {
 
 export function getAppIcon() {
   try {
-    const raw = localStorage.getItem(getKey('appIcon'));
+    const raw = storageGet(getKey('appIcon'));
     if (!raw) return null;
     const obj = JSON.parse(raw);
     return obj.dataUrl || null;
@@ -198,7 +238,7 @@ export function getAppIcon() {
 
 export function setAppIcon(dataUrl) {
   try {
-    localStorage.setItem(getKey('appIcon'), JSON.stringify({ dataUrl, hash: hashIconData(dataUrl) }));
+    storageSet(getKey('appIcon'), JSON.stringify({ dataUrl, hash: hashIconData(dataUrl) }));
   } catch (e) {
     throw new Error('图片过大，建议选择更小的图片');
   }
