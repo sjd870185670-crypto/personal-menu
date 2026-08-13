@@ -7,8 +7,7 @@ import {
   getProfile, setProfile, getLogs, getDateLog, updateDateLog,
   clearAllData, exportData, importData, computeTargetsFromProfile, getTodayStr, addCustomFood, deleteCustomFood,
   getNickname, setNickname, getGreeting, setGreeting, getSubtitle, setSubtitle,
-  getBreakfastIds, toggleBreakfastId, getAppIcon, setAppIcon, removeAppIcon,
-  isStorageAvailable
+  getBreakfastIds, toggleBreakfastId, getAppIcon, setAppIcon, removeAppIcon
 } from './store.js';
 
 const state = {
@@ -46,11 +45,6 @@ async function init() {
   bindPlan();
   bindProfile();
   bindProfileData();
-
-  // 检测本地存储是否可用，禁用时提前告知用户（避免建档后刷新数据丢失却毫无提示）
-  if (!isStorageAvailable()) {
-    showToast('警告：当前浏览器禁用了本地存储，数据无法保存。请改用手机自带浏览器（Safari / Chrome）打开本页面。', true);
-  }
 
   if (!state.profile) {
     switchTab('profile');
@@ -1080,83 +1074,6 @@ function renderPlanPage() {
   });
 }
 
-// ===== 午餐/晚餐结构化生成：主食=米饭/面条，至少1蔬菜+1荤菜，排除不健康快餐 =====
-const STAPLE_IDS = ['rice_cooked', 'noodle_cooked']; // 米饭 / 面条
-const FRUIT_IDS = new Set(['banana', 'apple', 'avocado', 'orange', 'grapes', 'mango', 'strawberry', 'blueberry']);
-const VEG_HOME_IDS = new Set(['sour_cabbage', 'garlic_broccoli', 'shredded_potato', 'hand_torn_cabbage', 'di_san_xian', 'dry_fried_beans', 'smashed_cucumber', 'wood_ear_salad', 'stir_fried_veg', 'garlic_spinach', 'veg_salad']);
-const MEAT_HOME_IDS = new Set(['tomato_egg', 'pepper_pork', 'braised_pork', 'kung_pao_chicken', 'fish_flavored_shreds', 'green_pepper_pork', 'cola_chicken_wings', 'braised_ribs', 'twice_cooked_pork', 'wood_mustard_meat', 'boiled_fish', 'pickled_fish', 'garlic_shrimp', 'tomato_beef_brisket', 'curry_chicken', 'teriyaki_chicken', 'sweet_sour_pork', 'winter_melon_rib_soup', 'corn_rib_soup']);
-const UNHEALTHY_CATS = new Set(['快餐', '零食', '饮品']); // 汉堡/薯条/披萨/炸鸡/方便面/巧克力/冰淇淋/可乐等
-
-function isVeg(f) { return (f.category === '蔬果' && !FRUIT_IDS.has(f.id)) || VEG_HOME_IDS.has(f.id); }
-function isMeat(f) { return f.category === '肉禽' || f.category === '水产' || MEAT_HOME_IDS.has(f.id); }
-function makeMealItem(f, grams) { const n = calcFoodNutrition(f, grams); return { food: f, grams, ...n }; }
-
-function buildMainMeal(basePool, usedIds, targetKcal) {
-  const pool = basePool.filter(f => !UNHEALTHY_CATS.has(f.category)); // 排除不健康快餐
-  const items = [];
-
-  // 1) 主食：米饭 或 面条（不计入跨餐去重，午/晚餐各自都能有主食）
-  const stapleCands = pool.filter(f => STAPLE_IDS.includes(f.id));
-  if (stapleCands.length) {
-    const f = stapleCands[Math.floor(Math.random() * stapleCands.length)];
-    items.push(makeMealItem(f, 150 + Math.floor(Math.random() * 100)));
-  }
-
-  // 2) 蔬菜：至少一个（优先未被选用过，没有则允许重复）
-  let vegCands = pool.filter(f => isVeg(f) && !usedIds.has(f.id));
-  if (!vegCands.length) vegCands = pool.filter(f => isVeg(f));
-  if (vegCands.length) {
-    const f = vegCands[Math.floor(Math.random() * vegCands.length)];
-    items.push(makeMealItem(f, 100 + Math.floor(Math.random() * 100)));
-    usedIds.add(f.id);
-  }
-
-  // 3) 荤菜：至少一个
-  let meatCands = pool.filter(f => isMeat(f) && !usedIds.has(f.id));
-  if (!meatCands.length) meatCands = pool.filter(f => isMeat(f));
-  if (meatCands.length) {
-    const f = meatCands[Math.floor(Math.random() * meatCands.length)];
-    items.push(makeMealItem(f, 100 + Math.floor(Math.random() * 100)));
-    usedIds.add(f.id);
-  }
-
-  // 4) 用剩余热量补足，避免太单调（不重复已选、不再选主食）
-  let remaining = targetKcal - items.reduce((s, i) => s + i.kcal, 0);
-  let tries = 0;
-  while (remaining > 80 && tries < 4) {
-    let cands = pool.filter(f => !usedIds.has(f.id) && !STAPLE_IDS.includes(f.id) && f.kcal <= remaining * 1.6);
-    if (!cands.length) cands = pool.filter(f => !STAPLE_IDS.includes(f.id) && f.kcal <= remaining * 1.6);
-    if (!cands.length) break;
-    const f = cands[Math.floor(Math.random() * cands.length)];
-    let grams = 100;
-    if (f.kcal < remaining * 0.4) grams = Math.min(300, Math.max(50, Math.round(remaining / f.kcal * 50)));
-    items.push(makeMealItem(f, grams));
-    usedIds.add(f.id);
-    remaining -= calcFoodNutrition(f, grams).kcal;
-    tries++;
-  }
-  return items;
-}
-
-function fillMeal(mealPool, usedIds, targetKcal) {
-  const items = [];
-  let remaining = targetKcal;
-  let tries = 0;
-  while (remaining > 50 && tries < 6) {
-    let candidates = mealPool.filter(f => !usedIds.has(f.id) && f.kcal <= remaining * 1.5);
-    if (candidates.length === 0) candidates = mealPool.filter(f => f.kcal <= remaining * 1.5);
-    if (candidates.length === 0) break;
-    const f = candidates[Math.floor(Math.random() * candidates.length)];
-    let grams = 100;
-    if (f.kcal < remaining * 0.4) grams = Math.min(300, Math.max(50, Math.round(remaining / f.kcal * 50)));
-    items.push(makeMealItem(f, grams));
-    remaining -= calcFoodNutrition(f, grams).kcal;
-    usedIds.add(f.id);
-    tries++;
-  }
-  return items;
-}
-
 function generatePlan() {
   if (!state.targets) {
     showModal('提示', `<p class="empty-state">请先完成个人建档。</p>`);
@@ -1173,18 +1090,27 @@ function generatePlan() {
 
   const ratios = { breakfast: 0.25, lunch: 0.35, dinner: 0.30, snack: 0.10 };
   const plan = {};
-  const usedIds = new Set(); // 跨餐次去重：记录当天已被选用过的食物
 
-  // 午餐/晚餐走结构化生成；素食偏好下退化为普通填充（无法满足荤菜要求）
-  const structured = pref !== 'vegetarian';
   for (const meal of ['breakfast', 'lunch', 'dinner', 'snack']) {
     const targetKcal = Math.round(state.targets.targetCalories * ratios[meal]);
-    if ((meal === 'lunch' || meal === 'dinner') && structured) {
-      plan[meal] = buildMainMeal(pool, usedIds, targetKcal);
-    } else {
-      const mealPool = meal === 'breakfast' ? (breakfastPool.length ? breakfastPool : pool) : pool;
-      plan[meal] = fillMeal(mealPool, usedIds, targetKcal);
+    const mealPool = meal === 'breakfast' ? (breakfastPool.length ? breakfastPool : pool) : pool;
+    const items = [];
+    let remaining = targetKcal;
+    let tries = 0;
+    while (remaining > 50 && tries < 6) {
+      const candidates = mealPool.filter(f => f.kcal <= remaining * 1.5);
+      if (candidates.length === 0) break;
+      const f = candidates[Math.floor(Math.random() * candidates.length)];
+      let grams = 100;
+      if (f.kcal < remaining * 0.4) {
+        grams = Math.min(300, Math.max(50, Math.round(remaining / f.kcal * 50)));
+      }
+      const n = calcFoodNutrition(f, grams);
+      items.push({ food: f, grams, ...n });
+      remaining -= n.kcal;
+      tries++;
     }
+    plan[meal] = items;
   }
 
   const total = Object.values(plan).flat().reduce((s, i) => ({ kcal: s.kcal + i.kcal, protein: s.protein + i.protein, fat: s.fat + i.fat, carb: s.carb + i.carb }), { kcal: 0, protein: 0, fat: 0, carb: 0 });
@@ -1338,12 +1264,10 @@ function bindProfile() {
   const goalSelect = document.getElementById('goal');
   const customInput = document.getElementById('custom-goal-value');
 
-  if (goalSelect) goalSelect.addEventListener('change', updateCustomGoalPreview);
-  if (customInput) customInput.addEventListener('input', updateCustomGoalPreview);
+  goalSelect.addEventListener('change', updateCustomGoalPreview);
+  customInput.addEventListener('input', updateCustomGoalPreview);
 
-  const form = document.getElementById('profile-form');
-  if (!form) return;
-  form.addEventListener('submit', e => {
+  document.getElementById('profile-form').addEventListener('submit', e => {
     e.preventDefault();
     const goal = document.getElementById('goal').value;
     const customVal = goal !== 'maintain' ? Math.max(0, parseInt(document.getElementById('custom-goal-value').value) || 0) : 0;
@@ -1362,46 +1286,16 @@ function bindProfile() {
       showToast('请填写完整信息');
       return;
     }
-    // 先确保真正落盘成功，再提示"保存成功"，避免存储被禁用时误导用户
-    try {
-      setProfile(profile);
-    } catch (err) {
-      console.error('保存档案失败：', err);
-      showToast(err.message || '保存失败，请重试', true);
-      return;
-    }
+    setProfile(profile);
     state.profile = profile;
     state.targets = computeTargetsFromProfile(profile);
-    try {
-      renderAll();
-    } catch (err) {
-      console.error('保存档案后渲染出错：', err);
-    }
-    showToast('保存成功');
+    renderAll();
+    showToast('档案已保存');
     switchTab('home');
   });
 }
 
 function renderProfilePage() {
-  // 在页面顶部给出一个明显的存储环境提示
-  let storageBanner = document.getElementById('storage-warning');
-  if (!storageBanner) {
-    storageBanner = document.createElement('div');
-    storageBanner.id = 'storage-warning';
-    storageBanner.style.cssText = 'display:none;margin:0 16px 12px;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.5;background:#FFF3E6;color:#A65D35;border:1px solid #FFD9B3;';
-    const form = document.getElementById('profile-form');
-    if (form && form.parentNode) form.parentNode.insertBefore(storageBanner, form);
-  }
-  if (storageBanner) {
-    if (!isStorageAvailable()) {
-      storageBanner.style.display = 'block';
-      storageBanner.innerHTML = '⚠️ 当前浏览器（如小米 AI、微信内置浏览器等）可能会限制网页保存数据，<b>请用手机自带浏览器（Safari / Chrome）打开本页面</b>，否则刷新后数据可能丢失。';
-    } else {
-      storageBanner.style.display = 'none';
-      storageBanner.textContent = '';
-    }
-  }
-
   if (!state.profile) {
     document.getElementById('target-grid').style.display = 'none';
     document.getElementById('custom-goal-group').style.display = 'none';
@@ -1461,7 +1355,7 @@ function bindProfileData() {
         closeModal();
         showToast('导入成功');
       } catch (e) {
-        showToast(e && e.message ? e.message : 'JSON 格式错误', true);
+        showToast('JSON 格式错误');
       }
     });
   });
@@ -1478,12 +1372,12 @@ function bindProfileData() {
   });
 }
 
-function showToast(msg, isError) {
+function showToast(msg) {
   const toast = document.createElement('div');
   toast.textContent = msg;
-  toast.style.cssText = `position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:${isError ? '#C0392B' : '#3D322B'};color:#fff;padding:10px 18px;border-radius:999px;font-size:14px;max-width:86vw;text-align:center;z-index:200;box-shadow:var(--shadow);`;
+  toast.style.cssText = `position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:#3D322B;color:#fff;padding:10px 18px;border-radius:999px;font-size:14px;z-index:200;box-shadow:var(--shadow);`;
   document.body.appendChild(toast);
-  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity .3s'; setTimeout(() => toast.remove(), 300); }, isError ? 3200 : 1800);
+  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity .3s'; setTimeout(() => toast.remove(), 300); }, 1800);
 }
 
 // Go
