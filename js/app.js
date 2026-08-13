@@ -7,7 +7,8 @@ import {
   getProfile, setProfile, getLogs, getDateLog, updateDateLog,
   clearAllData, exportData, importData, computeTargetsFromProfile, getTodayStr, addCustomFood, deleteCustomFood,
   getNickname, setNickname, getGreeting, setGreeting, getSubtitle, setSubtitle,
-  getBreakfastIds, toggleBreakfastId, getAppIcon, setAppIcon, removeAppIcon
+  getBreakfastIds, toggleBreakfastId, getAppIcon, setAppIcon, removeAppIcon,
+  isStorageAvailable
 } from './store.js';
 
 const state = {
@@ -45,6 +46,11 @@ async function init() {
   bindPlan();
   bindProfile();
   bindProfileData();
+
+  // 检测本地存储是否可用，禁用时提前告知用户（避免建档后刷新数据丢失却毫无提示）
+  if (!isStorageAvailable()) {
+    showToast('警告：当前浏览器禁用了本地存储，数据无法保存。请改用手机自带浏览器（Safari / Chrome）打开本页面。', true);
+  }
 
   if (!state.profile) {
     switchTab('profile');
@@ -1356,10 +1362,17 @@ function bindProfile() {
       showToast('请填写完整信息');
       return;
     }
+    // 先确保真正落盘成功，再提示"保存成功"，避免存储被禁用时误导用户
     try {
       setProfile(profile);
-      state.profile = profile;
-      state.targets = computeTargetsFromProfile(profile);
+    } catch (err) {
+      console.error('保存档案失败：', err);
+      showToast(err.message || '保存失败，请重试', true);
+      return;
+    }
+    state.profile = profile;
+    state.targets = computeTargetsFromProfile(profile);
+    try {
       renderAll();
     } catch (err) {
       console.error('保存档案后渲染出错：', err);
@@ -1429,7 +1442,7 @@ function bindProfileData() {
         closeModal();
         showToast('导入成功');
       } catch (e) {
-        showToast('JSON 格式错误');
+        showToast(e && e.message ? e.message : 'JSON 格式错误', true);
       }
     });
   });
@@ -1446,12 +1459,12 @@ function bindProfileData() {
   });
 }
 
-function showToast(msg) {
+function showToast(msg, isError) {
   const toast = document.createElement('div');
   toast.textContent = msg;
-  toast.style.cssText = `position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:#3D322B;color:#fff;padding:10px 18px;border-radius:999px;font-size:14px;z-index:200;box-shadow:var(--shadow);`;
+  toast.style.cssText = `position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:${isError ? '#C0392B' : '#3D322B'};color:#fff;padding:10px 18px;border-radius:999px;font-size:14px;max-width:86vw;text-align:center;z-index:200;box-shadow:var(--shadow);`;
   document.body.appendChild(toast);
-  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity .3s'; setTimeout(() => toast.remove(), 300); }, 1800);
+  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity .3s'; setTimeout(() => toast.remove(), 300); }, isError ? 3200 : 1800);
 }
 
 // Go
