@@ -1,102 +1,115 @@
-// localStorage 数据持久化
+// localStorage + cookie 双保险数据持久化
 import { calcBMR, calcTDEE, calcTargets } from './calc.js';
 
 const PREFIX = 'menu_v1_';
 
-function getKey(key) {
-  return PREFIX + key;
+// 采用双备份的 key（数据量小、且不能丢的）
+const DUAL_BACKUP_KEYS = new Set(['profile', 'nickname', 'subtitle', 'breakfastIds']);
+
+function getKey(key) { return PREFIX + key; }
+
+// ---------------- cookie 读写 ----------------
+function setCookie(name, value, days = 365) {
+  try {
+    const encoded = encodeURIComponent(value);
+    const expires = new Date(Date.now() + days * 864e5).toUTCString();
+    document.cookie = `${encodeURIComponent(name)}=${encoded}; expires=${expires}; path=/; SameSite=Lax; Secure`;
+    return true;
+  } catch (e) { return false; }
 }
 
-// 统一读取：在禁用存储的上下文（无痕/App 内浏览器）中 getItem 可能抛错，安全降级为 null
-function storageGet(key) {
+function getCookie(name) {
   try {
-    return localStorage.getItem(key);
-  } catch (e) {
-    return null;
+    const key = encodeURIComponent(name) + '=';
+    const parts = document.cookie.split(';');
+    for (let part of parts) {
+      part = part.trim();
+      if (part.indexOf(key) === 0) return decodeURIComponent(part.substring(key.length));
+    }
+  } catch (e) {}
+  return null;
+}
+
+// ---------------- 底层双存储 ----------------
+function storageRead(key) {
+  const full = getKey(key);
+  try {
+    const v = localStorage.getItem(full);
+    if (v !== null) return v;
+  } catch (e) {}
+  try {
+    const v = getCookie(full);
+    if (v !== null) return v;
+  } catch (e) {}
+  return null;
+}
+
+function storageWrite(key, value) {
+  const full = getKey(key);
+  let ok = false;
+  // 1. 尝试 localStorage
+  try {
+    localStorage.setItem(full, value);
+    ok = true;
+  } catch (e) {}
+  // 2. 对核心 key 再尝试 cookie 备份
+  if (DUAL_BACKUP_KEYS.has(key)) {
+    try {
+      if (setCookie(full, value)) ok = true;
+    } catch (e) {}
+  }
+  // 3. 全失败才抛错
+  if (!ok) {
+    throw new Error('无法保存：当前浏览器环境禁用了本地存储（常见于无痕模式、小米/微信/QQ 等 App 内浏览器、或"添加到主屏幕"的受限模式）。请改用手机自带浏览器（Safari / Chrome）打开本页面后再建档。');
   }
 }
 
-// 统一写入：写完回读校验，确认真的持久化成功；被禁用时抛出清晰中文错误
-function storageSet(key, value) {
-  try {
-    localStorage.setItem(key, value);
-    const check = localStorage.getItem(key);
-    if (check === null && value !== null) {
-      throw new Error('write-not-persisted');
-    }
-  } catch (e) {
-    const name = (e && e.name) || '';
-    const blocked = name === 'SecurityError' || name === 'QuotaExceededError' || (e && e.message === 'write-not-persisted');
-    if (blocked) {
-      throw new Error('无法保存：当前浏览器环境禁用了本地存储（常见于无痕模式、微信/QQ 等 App 内浏览器，或"添加到主屏幕"的受限模式）。请改用手机自带浏览器（Safari / Chrome）打开本页面后再建档。');
-    }
-    throw e;
-  }
-}
-
-// 检测存储是否可用：在页面加载时就告诉用户，避免事后才发现保存无效
+// 检测至少有一种存储可用
 export function isStorageAvailable() {
   try {
     const testKey = getKey('__test__');
-    storageSet(testKey, '1');
-    storageGet(testKey);
+    localStorage.setItem(testKey, '1');
     localStorage.removeItem(testKey);
     return true;
   } catch (e) {
+    try {
+      const testKey = getKey('__test__');
+      if (setCookie(testKey, '1')) return true;
+    } catch (e2) {}
     return false;
   }
 }
 
+// ---------------- 对外 API ----------------
 export function getProfile() {
-  const raw = storageGet(getKey('profile'));
+  const raw = storageRead('profile');
   if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch (e) {
-    return null;
-  }
+  try { return JSON.parse(raw); } catch (e) { return null; }
 }
 
 export function setProfile(profile) {
-  storageSet(getKey('profile'), JSON.stringify(profile));
+  storageWrite('profile', JSON.stringify(profile));
 }
 
-export function getNickname() {
-  return storageGet(getKey('nickname')) || '';
-}
+export function getNickname() { return storageRead('nickname') || ''; }
+export function setNickname(name) { storageWrite('nickname', String(name).trim()); }
 
-export function setNickname(name) {
-  storageSet(getKey('nickname'), String(name).trim());
-}
+export function getGreeting() { return storageRead('greeting') || ''; }
+export function setGreeting(text) { storageWrite('greeting', String(text).trim()); }
 
-export function getGreeting() {
-  return storageGet(getKey('greeting')) || '';
-}
-
-export function setGreeting(text) {
-  storageSet(getKey('greeting'), String(text).trim());
-}
-
-export function getSubtitle() {
-  return storageGet(getKey('subtitle')) || '';
-}
-
-export function setSubtitle(text) {
-  storageSet(getKey('subtitle'), String(text).trim());
-}
+export function getSubtitle() { return storageRead('subtitle') || ''; }
+export function setSubtitle(text) { storageWrite('subtitle', String(text).trim()); }
 
 export function getLogs() {
-  const raw = storageGet(getKey('logs'));
+  const raw = storageRead('logs');
   if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch (e) {
-    return {};
-  }
+  try { return JSON.parse(raw); } catch (e) { return {}; }
 }
 
 export function setLogs(logs) {
-  storageSet(getKey('logs'), JSON.stringify(logs));
+  // 日志可能较大，只用 localStorage，不备份 cookie
+  try { localStorage.setItem(getKey('logs'), JSON.stringify(logs)); }
+  catch (e) { throw new Error('无法保存记录：浏览器存储空间不足或已被禁用。'); }
 }
 
 export function getDateLog(date) {
@@ -122,7 +135,18 @@ export function updateDateLog(date, patch) {
 
 export function clearAllData() {
   const keys = Object.keys(localStorage).filter(k => k.startsWith(PREFIX));
-  keys.forEach(k => localStorage.removeItem(k));
+  keys.forEach(k => {
+    try { localStorage.removeItem(k); } catch (e) {}
+  });
+  // 同时清理 cookie
+  try {
+    document.cookie.split(';').forEach(c => {
+      const name = c.split('=')[0].trim();
+      if (name.startsWith(encodeURIComponent(PREFIX))) {
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax; Secure`;
+      }
+    });
+  } catch (e) {}
 }
 
 export function exportData() {
@@ -161,17 +185,22 @@ export function getTodayStr() {
 }
 
 export function getCustomFoods() {
-  const raw = storageGet(getKey('customFoods'));
+  const raw = storageRead('customFoods');
   if (!raw) return [];
-  try {
-    return JSON.parse(raw);
-  } catch (e) {
-    return [];
-  }
+  try { return JSON.parse(raw); } catch (e) { return []; }
 }
 
 export function setCustomFoods(list) {
-  storageSet(getKey('customFoods'), JSON.stringify(list));
+  // 自定义食物可能较大，仍优先用 localStorage；失败再尝试 cookie（仅小数据）
+  const s = JSON.stringify(list);
+  try {
+    localStorage.setItem(getKey('customFoods'), s);
+  } catch (e) {
+    if (s.length < 1500) {
+      try { setCookie(getKey('customFoods'), s); return; } catch (e2) {}
+    }
+    throw new Error('无法保存自定义食物：浏览器存储空间不足或已被禁用。');
+  }
 }
 
 export function addCustomFood(food) {
@@ -189,17 +218,13 @@ export function deleteCustomFood(id) {
 }
 
 export function getBreakfastIds() {
-  const raw = storageGet(getKey('breakfastIds'));
+  const raw = storageRead('breakfastIds');
   if (!raw) return [];
-  try {
-    return JSON.parse(raw);
-  } catch (e) {
-    return [];
-  }
+  try { return JSON.parse(raw); } catch (e) { return []; }
 }
 
 export function setBreakfastIds(ids) {
-  storageSet(getKey('breakfastIds'), JSON.stringify(ids));
+  storageWrite('breakfastIds', JSON.stringify(ids));
 }
 
 export function toggleBreakfastId(id) {
@@ -220,30 +245,26 @@ function hashIconData(dataUrl) {
       h = (h * 31 + bin.charCodeAt(i)) | 0;
     }
     return String(h);
-  } catch (e) {
-    return '';
-  }
+  } catch (e) { return ''; }
 }
 
 export function getAppIcon() {
   try {
-    const raw = storageGet(getKey('appIcon'));
+    const raw = localStorage.getItem(getKey('appIcon'));
     if (!raw) return null;
     const obj = JSON.parse(raw);
     return obj.dataUrl || null;
-  } catch (e) {
-    return null;
-  }
+  } catch (e) { return null; }
 }
 
 export function setAppIcon(dataUrl) {
   try {
-    storageSet(getKey('appIcon'), JSON.stringify({ dataUrl, hash: hashIconData(dataUrl) }));
+    localStorage.setItem(getKey('appIcon'), JSON.stringify({ dataUrl, hash: hashIconData(dataUrl) }));
   } catch (e) {
     throw new Error('图片过大，建议选择更小的图片');
   }
 }
 
 export function removeAppIcon() {
-  localStorage.removeItem(getKey('appIcon'));
+  try { localStorage.removeItem(getKey('appIcon')); } catch (e) {}
 }
