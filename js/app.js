@@ -1290,7 +1290,7 @@ function bindProfile() {
     state.profile = profile;
     state.targets = computeTargetsFromProfile(profile);
     renderAll();
-    showToast('档案已保存');
+    showToast('保存成功');
     switchTab('home');
   });
 }
