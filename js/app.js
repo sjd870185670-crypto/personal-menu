@@ -1074,6 +1074,83 @@ function renderPlanPage() {
   });
 }
 
+// ===== 午餐/晚餐结构化生成：主食=米饭/面条，至少1蔬菜+1荤菜，排除不健康快餐 =====
+const STAPLE_IDS = ['rice_cooked', 'noodle_cooked']; // 米饭 / 面条
+const FRUIT_IDS = new Set(['banana', 'apple', 'avocado', 'orange', 'grapes', 'mango', 'strawberry', 'blueberry']);
+const VEG_HOME_IDS = new Set(['sour_cabbage', 'garlic_broccoli', 'shredded_potato', 'hand_torn_cabbage', 'di_san_xian', 'dry_fried_beans', 'smashed_cucumber', 'wood_ear_salad', 'stir_fried_veg', 'garlic_spinach', 'veg_salad']);
+const MEAT_HOME_IDS = new Set(['tomato_egg', 'pepper_pork', 'braised_pork', 'kung_pao_chicken', 'fish_flavored_shreds', 'green_pepper_pork', 'cola_chicken_wings', 'braised_ribs', 'twice_cooked_pork', 'wood_mustard_meat', 'boiled_fish', 'pickled_fish', 'garlic_shrimp', 'tomato_beef_brisket', 'curry_chicken', 'teriyaki_chicken', 'sweet_sour_pork', 'winter_melon_rib_soup', 'corn_rib_soup']);
+const UNHEALTHY_CATS = new Set(['快餐', '零食', '饮品']); // 汉堡/薯条/披萨/炸鸡/方便面/巧克力/冰淇淋/可乐等
+
+function isVeg(f) { return (f.category === '蔬果' && !FRUIT_IDS.has(f.id)) || VEG_HOME_IDS.has(f.id); }
+function isMeat(f) { return f.category === '肉禽' || f.category === '水产' || MEAT_HOME_IDS.has(f.id); }
+function makeMealItem(f, grams) { const n = calcFoodNutrition(f, grams); return { food: f, grams, ...n }; }
+
+function buildMainMeal(basePool, usedIds, targetKcal) {
+  const pool = basePool.filter(f => !UNHEALTHY_CATS.has(f.category)); // 排除不健康快餐
+  const items = [];
+
+  // 1) 主食：米饭 或 面条（不计入跨餐去重，午/晚餐各自都能有主食）
+  const stapleCands = pool.filter(f => STAPLE_IDS.includes(f.id));
+  if (stapleCands.length) {
+    const f = stapleCands[Math.floor(Math.random() * stapleCands.length)];
+    items.push(makeMealItem(f, 150 + Math.floor(Math.random() * 100)));
+  }
+
+  // 2) 蔬菜：至少一个（优先未被选用过，没有则允许重复）
+  let vegCands = pool.filter(f => isVeg(f) && !usedIds.has(f.id));
+  if (!vegCands.length) vegCands = pool.filter(f => isVeg(f));
+  if (vegCands.length) {
+    const f = vegCands[Math.floor(Math.random() * vegCands.length)];
+    items.push(makeMealItem(f, 100 + Math.floor(Math.random() * 100)));
+    usedIds.add(f.id);
+  }
+
+  // 3) 荤菜：至少一个
+  let meatCands = pool.filter(f => isMeat(f) && !usedIds.has(f.id));
+  if (!meatCands.length) meatCands = pool.filter(f => isMeat(f));
+  if (meatCands.length) {
+    const f = meatCands[Math.floor(Math.random() * meatCands.length)];
+    items.push(makeMealItem(f, 100 + Math.floor(Math.random() * 100)));
+    usedIds.add(f.id);
+  }
+
+  // 4) 用剩余热量补足，避免太单调（不重复已选、不再选主食）
+  let remaining = targetKcal - items.reduce((s, i) => s + i.kcal, 0);
+  let tries = 0;
+  while (remaining > 80 && tries < 4) {
+    let cands = pool.filter(f => !usedIds.has(f.id) && !STAPLE_IDS.includes(f.id) && f.kcal <= remaining * 1.6);
+    if (!cands.length) cands = pool.filter(f => !STAPLE_IDS.includes(f.id) && f.kcal <= remaining * 1.6);
+    if (!cands.length) break;
+    const f = cands[Math.floor(Math.random() * cands.length)];
+    let grams = 100;
+    if (f.kcal < remaining * 0.4) grams = Math.min(300, Math.max(50, Math.round(remaining / f.kcal * 50)));
+    items.push(makeMealItem(f, grams));
+    usedIds.add(f.id);
+    remaining -= calcFoodNutrition(f, grams).kcal;
+    tries++;
+  }
+  return items;
+}
+
+function fillMeal(mealPool, usedIds, targetKcal) {
+  const items = [];
+  let remaining = targetKcal;
+  let tries = 0;
+  while (remaining > 50 && tries < 6) {
+    let candidates = mealPool.filter(f => !usedIds.has(f.id) && f.kcal <= remaining * 1.5);
+    if (candidates.length === 0) candidates = mealPool.filter(f => f.kcal <= remaining * 1.5);
+    if (candidates.length === 0) break;
+    const f = candidates[Math.floor(Math.random() * candidates.length)];
+    let grams = 100;
+    if (f.kcal < remaining * 0.4) grams = Math.min(300, Math.max(50, Math.round(remaining / f.kcal * 50)));
+    items.push(makeMealItem(f, grams));
+    remaining -= calcFoodNutrition(f, grams).kcal;
+    usedIds.add(f.id);
+    tries++;
+  }
+  return items;
+}
+
 function generatePlan() {
   if (!state.targets) {
     showModal('提示', `<p class="empty-state">请先完成个人建档。</p>`);
@@ -1092,32 +1169,16 @@ function generatePlan() {
   const plan = {};
   const usedIds = new Set(); // 跨餐次去重：记录当天已被选用过的食物
 
+  // 午餐/晚餐走结构化生成；素食偏好下退化为普通填充（无法满足荤菜要求）
+  const structured = pref !== 'vegetarian';
   for (const meal of ['breakfast', 'lunch', 'dinner', 'snack']) {
     const targetKcal = Math.round(state.targets.targetCalories * ratios[meal]);
-    const mealPool = meal === 'breakfast' ? (breakfastPool.length ? breakfastPool : pool) : pool;
-    const items = [];
-    let remaining = targetKcal;
-    let tries = 0;
-    while (remaining > 50 && tries < 6) {
-      // 优先从未被选用过的食物里挑，避免同一道菜在多餐重复出现
-      let candidates = mealPool.filter(f => !usedIds.has(f.id) && f.kcal <= remaining * 1.5);
-      // 食物库较小、候选不足时放宽限制，允许重复，避免选不出
-      if (candidates.length === 0) {
-        candidates = mealPool.filter(f => f.kcal <= remaining * 1.5);
-      }
-      if (candidates.length === 0) break;
-      const f = candidates[Math.floor(Math.random() * candidates.length)];
-      let grams = 100;
-      if (f.kcal < remaining * 0.4) {
-        grams = Math.min(300, Math.max(50, Math.round(remaining / f.kcal * 50)));
-      }
-      const n = calcFoodNutrition(f, grams);
-      items.push({ food: f, grams, ...n });
-      remaining -= n.kcal;
-      usedIds.add(f.id);
-      tries++;
+    if ((meal === 'lunch' || meal === 'dinner') && structured) {
+      plan[meal] = buildMainMeal(pool, usedIds, targetKcal);
+    } else {
+      const mealPool = meal === 'breakfast' ? (breakfastPool.length ? breakfastPool : pool) : pool;
+      plan[meal] = fillMeal(mealPool, usedIds, targetKcal);
     }
-    plan[meal] = items;
   }
 
   const total = Object.values(plan).flat().reduce((s, i) => ({ kcal: s.kcal + i.kcal, protein: s.protein + i.protein, fat: s.fat + i.fat, carb: s.carb + i.carb }), { kcal: 0, protein: 0, fat: 0, carb: 0 });
