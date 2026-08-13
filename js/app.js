@@ -1,14 +1,14 @@
 import {
   calcBMR, calcTDEE, calcTargets, calcExerciseBurn, calcFoodNutrition,
   sumItems, calcDayStats, getActivityLabel, getGoalLabel, estimateWeightJinPerWeek
-} from './calc.js?v=20260813-2';
-import { FOOD_DB, getAllFoods, getFoodIcon, ACTIVITY_DB, MEAL_LABELS, MEAL_ICONS } from './fooddb.js?v=20260813-2';
+} from './calc.js';
+import { FOOD_DB, getAllFoods, getFoodIcon, ACTIVITY_DB, MEAL_LABELS, MEAL_ICONS } from './fooddb.js';
 import {
   getProfile, setProfile, getLogs, getDateLog, updateDateLog,
   clearAllData, exportData, importData, computeTargetsFromProfile, getTodayStr, addCustomFood, deleteCustomFood,
   getNickname, setNickname, getGreeting, setGreeting, getSubtitle, setSubtitle,
   getBreakfastIds, toggleBreakfastId, getAppIcon, setAppIcon, removeAppIcon
-} from './store.js?v=20260813-2';
+} from './store.js';
 
 const state = {
   currentDate: getTodayStr(),
@@ -1264,10 +1264,12 @@ function bindProfile() {
   const goalSelect = document.getElementById('goal');
   const customInput = document.getElementById('custom-goal-value');
 
-  goalSelect.addEventListener('change', updateCustomGoalPreview);
-  customInput.addEventListener('input', updateCustomGoalPreview);
+  if (goalSelect) goalSelect.addEventListener('change', updateCustomGoalPreview);
+  if (customInput) customInput.addEventListener('input', updateCustomGoalPreview);
 
-  document.getElementById('profile-form').addEventListener('submit', e => {
+  const form = document.getElementById('profile-form');
+  if (!form) return;
+  form.addEventListener('submit', e => {
     e.preventDefault();
     const goal = document.getElementById('goal').value;
     const customVal = goal !== 'maintain' ? Math.max(0, parseInt(document.getElementById('custom-goal-value').value) || 0) : 0;
@@ -1286,10 +1288,14 @@ function bindProfile() {
       showToast('请填写完整信息');
       return;
     }
-    setProfile(profile);
-    state.profile = profile;
-    state.targets = computeTargetsFromProfile(profile);
-    renderAll();
+    try {
+      setProfile(profile);
+      state.profile = profile;
+      state.targets = computeTargetsFromProfile(profile);
+      renderAll();
+    } catch (err) {
+      console.error('保存档案后渲染出错：', err);
+    }
     showToast('保存成功');
     switchTab('home');
   });
