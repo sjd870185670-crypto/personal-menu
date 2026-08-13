@@ -1090,6 +1090,7 @@ function generatePlan() {
 
   const ratios = { breakfast: 0.25, lunch: 0.35, dinner: 0.30, snack: 0.10 };
   const plan = {};
+  const usedIds = new Set(); // 跨餐次去重：记录当天已被选用过的食物
 
   for (const meal of ['breakfast', 'lunch', 'dinner', 'snack']) {
     const targetKcal = Math.round(state.targets.targetCalories * ratios[meal]);
@@ -1098,7 +1099,12 @@ function generatePlan() {
     let remaining = targetKcal;
     let tries = 0;
     while (remaining > 50 && tries < 6) {
-      const candidates = mealPool.filter(f => f.kcal <= remaining * 1.5);
+      // 优先从未被选用过的食物里挑，避免同一道菜在多餐重复出现
+      let candidates = mealPool.filter(f => !usedIds.has(f.id) && f.kcal <= remaining * 1.5);
+      // 食物库较小、候选不足时放宽限制，允许重复，避免选不出
+      if (candidates.length === 0) {
+        candidates = mealPool.filter(f => f.kcal <= remaining * 1.5);
+      }
       if (candidates.length === 0) break;
       const f = candidates[Math.floor(Math.random() * candidates.length)];
       let grams = 100;
@@ -1108,6 +1114,7 @@ function generatePlan() {
       const n = calcFoodNutrition(f, grams);
       items.push({ food: f, grams, ...n });
       remaining -= n.kcal;
+      usedIds.add(f.id);
       tries++;
     }
     plan[meal] = items;
