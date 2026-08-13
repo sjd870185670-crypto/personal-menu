@@ -1,14 +1,14 @@
 import {
   calcBMR, calcTDEE, calcTargets, calcExerciseBurn, calcFoodNutrition,
   sumItems, calcDayStats, getActivityLabel, getGoalLabel, estimateWeightJinPerWeek
-} from './calc.js';
-import { FOOD_DB, getAllFoods, getFoodIcon, ACTIVITY_DB, MEAL_LABELS, MEAL_ICONS } from './fooddb.js';
+} from './calc.js?v=20260813-2';
+import { FOOD_DB, getAllFoods, getFoodIcon, ACTIVITY_DB, MEAL_LABELS, MEAL_ICONS } from './fooddb.js?v=20260813-2';
 import {
   getProfile, setProfile, getLogs, getDateLog, updateDateLog,
   clearAllData, exportData, importData, computeTargetsFromProfile, getTodayStr, addCustomFood, deleteCustomFood,
   getNickname, setNickname, getGreeting, setGreeting, getSubtitle, setSubtitle,
   getBreakfastIds, toggleBreakfastId, getAppIcon, setAppIcon, removeAppIcon
-} from './store.js';
+} from './store.js?v=20260813-2';
 
 const state = {
   currentDate: getTodayStr(),
